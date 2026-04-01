@@ -3,7 +3,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QTabWidget, QTextEdit,
                              QScrollArea, QPushButton, QHBoxLayout, QLabel,
                              QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
-                             QSplitter, QCheckBox, QMessageBox)
+                             QSplitter, QCheckBox, QMessageBox, QFrame, QGridLayout)
 from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal, QTimer
 from PyQt5.QtGui import QTextCursor
 from datetime import datetime
@@ -13,6 +13,7 @@ from gui.widgets import SignalStatusWidget, ConnectionStatusWidget
 from gui.utils import create_logo_widget
 from canbus.pcan_interface import PCANInterface
 from canbus.signal_matcher import SignalMatcher
+from canbus.pgn_decoder import PGNDecoder
 from config.app_config import APP_NAME
 
 
@@ -71,6 +72,11 @@ class MonitoringScreen(QWidget):
         # Override mode tracking
         self.override_mode = False  # False = Append mode, True = Override mode
         self.override_row_map: Dict[int, int] = {}  # {can_id: row_index} for override mode
+
+        # PGN live data decoder (None if config has no pgn_channels)
+        self.pgn_decoder: Optional[PGNDecoder] = None
+        # Live value label widgets: {label_name: QLabel}
+        self.live_value_labels: Dict[str, QLabel] = {}
 
         # Timer for batched GUI updates (60 FPS = smooth, no latency)
         self.display_update_timer = QTimer()
@@ -148,6 +154,13 @@ class MonitoringScreen(QWidget):
         # Tab 2: Logging
         self.log_tab = self._create_log_tab()
         self.tab_widget.addTab(self.log_tab, "CAN Bus Log")
+
+        # Tab 3: Live Engine Data — only if configuration has pgn_channels
+        pgn_channels = self.configuration.get('pgn_channels', [])
+        if pgn_channels:
+            self.pgn_decoder = PGNDecoder(pgn_channels)
+            self.live_data_tab = self._create_live_data_tab()
+            self.tab_widget.addTab(self.live_data_tab, "📊 Live Engine Data")
 
         layout.addWidget(self.tab_widget)
 
@@ -317,6 +330,66 @@ class MonitoringScreen(QWidget):
         layout.addLayout(button_layout)
         panel.setLayout(layout)
         return panel
+
+    def _create_live_data_tab(self) -> QWidget:
+        """
+        Create the Live Engine Data tab with a grid of value cards.
+
+        Returns:
+            Tab widget containing the live data cards.
+        """
+        tab = QWidget()
+        outer_layout = QVBoxLayout()
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+
+        container = QWidget()
+        grid = QGridLayout()
+        grid.setSpacing(10)
+
+        labels = self.pgn_decoder.get_channel_labels()
+        cols = 3
+        for idx, label in enumerate(labels):
+            row = idx // cols
+            col = idx % cols
+
+            card = QFrame()
+            card.setFrameShape(QFrame.Box)
+            card.setStyleSheet(
+                "QFrame { background-color: #f8f9fa; border: 1px solid #dee2e6; "
+                "border-radius: 8px; padding: 4px; }"
+            )
+
+            card_layout = QVBoxLayout()
+            card_layout.setAlignment(Qt.AlignCenter)
+
+            name_label = QLabel(label)
+            name_label.setAlignment(Qt.AlignCenter)
+            name_label.setStyleSheet("font-size: 10pt; color: #495057;")
+            card_layout.addWidget(name_label)
+
+            value_label = QLabel("---")
+            value_label.setAlignment(Qt.AlignCenter)
+            value_label.setStyleSheet("font-size: 18pt; font-weight: bold; color: #212529;")
+            card_layout.addWidget(value_label)
+
+            card.setLayout(card_layout)
+            grid.addWidget(card, row, col)
+
+            self.live_value_labels[label] = value_label
+
+        container.setLayout(grid)
+        scroll_area.setWidget(container)
+        outer_layout.addWidget(scroll_area)
+
+        note_label = QLabel("Values update in real-time from J1939 CAN bus data")
+        note_label.setAlignment(Qt.AlignCenter)
+        note_label.setStyleSheet("font-size: 9pt; color: #6c757d; padding: 4px;")
+        outer_layout.addWidget(note_label)
+
+        tab.setLayout(outer_layout)
+        return tab
 
     def _create_log_table_panel(self) -> QWidget:
         """Create the log table panel."""
@@ -658,6 +731,15 @@ class MonitoringScreen(QWidget):
                         self.signal_last_status[signal_name] = is_match
             # If message CAN ID doesn't match this signal's CAN ID, don't change LED state
             # This keeps the LED latched at its previous state
+
+        # Decode PGN live data if decoder is active
+        if self.pgn_decoder:
+            decoded = self.pgn_decoder.decode(message.arbitration_id, list(message.data))
+            for label, (value, unit) in decoded.items():
+                if label in self.live_value_labels:
+                    fmt = self.pgn_decoder.get_format(label)
+                    display_text = fmt.format(value) + f" {unit}"
+                    self.live_value_labels[label].setText(display_text)
 
     @pyqtSlot(str)
     def _on_error(self, error_message: str):
