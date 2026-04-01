@@ -104,6 +104,12 @@ class ConfigurationLoader:
                         signal['bit_index'] = self._parse_value(signal['bit_index'])
                     if 'bit_value' in signal:
                         signal['bit_value'] = self._parse_value(signal['bit_value'])
+
+            # Parse pgn_channels hex PGN strings to integers
+            if 'pgn_channels' in config:
+                for channel in config['pgn_channels']:
+                    if 'pgn' in channel:
+                        channel['pgn'] = self._parse_value(channel['pgn'])
         
         return self.configurations
 
