@@ -20,7 +20,7 @@ class PGNDecoder:
                     "scale": 0.125,
                     "offset": 0,
                     "unit": "rpm",
-                    "format": "{:.0f}"
+                    "format": "{:.2f}"
                 }
         """
         self._channels: List[Dict] = pgn_channels
@@ -91,12 +91,12 @@ class PGNDecoder:
             label: Channel label string.
 
         Returns:
-            Python format string, e.g. "{:.0f}". Defaults to "{:.1f}".
+            Python format string, e.g. "{:.2f}". Defaults to "{:.2f}".
         """
         for ch in self._channels:
             if ch.get('label') == label:
-                return ch.get('format', '{:.1f}')
-        return '{:.1f}'
+                return ch.get('format', '{:.2f}')
+        return '{:.2f}'
 
     # ------------------------------------------------------------------
     # Internal helpers
